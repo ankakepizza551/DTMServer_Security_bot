@@ -28,5 +28,14 @@ REJECTED_DM_MESSAGE = os.getenv(
     "{guild_name} への参加申請が承認されませんでした。",
 )
 
+# 承認後にウェルカムメッセージを投稿するチャンネル名 (空にすると投稿しない)
+WELCOME_CHANNEL_NAME = os.getenv("WELCOME_CHANNEL_NAME", "general")
+
+# ウェルカムメッセージのテンプレート ({member} と {guild} が使用可能)
+WELCOME_MESSAGE_TEMPLATE = os.getenv(
+    "WELCOME_MESSAGE_TEMPLATE",
+    "{member} さん、認証お疲れ様でした！ **{guild}** へようこそ！🎉",
+)
+
 # データ保存先
 DB_PATH = os.getenv("DB_PATH", "data/pending.json")

@@ -10,7 +10,8 @@
    - **承認**: 「認証待ち」ロールを外し、「DTMメンバー」ロールを付与する。
    - **拒否**: 設定によりサーバーからKickする（`KICK_ON_REJECT`）。
 4. 対応結果がメッセージに反映され、ボタンは無効化される。
-5. Bot再起動後も、未対応の申請ボタンは引き続き機能する（`data/pending.json` に保存）。
+5. 承認時は設定したウェルカムチャンネル（デフォルト: `general`）にもメッセージが投稿される（`WELCOME_CHANNEL_NAME` を空にすると無効）。
+6. Bot再起動後も、未対応の申請ボタンは引き続き機能する（`data/pending.json` に保存）。
 
 ## セットアップ
 
@@ -54,3 +55,5 @@ python main.py
 | `KICK_ON_REJECT` | 拒否時にKickするか (true/false) | true |
 | `APPROVED_DM_MESSAGE` | 承認時にDMするメッセージ (空で無効) | あり |
 | `REJECTED_DM_MESSAGE` | 拒否時にDMするメッセージ (空で無効) | あり |
+| `WELCOME_CHANNEL_NAME` | 承認後にウェルカムメッセージを投稿するチャンネル名 (空で無効) | general |
+| `WELCOME_MESSAGE_TEMPLATE` | ウェルカムメッセージのテンプレート (`{member}` `{guild}` が使用可能) | あり |

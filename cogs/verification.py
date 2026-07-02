@@ -143,6 +143,18 @@ class VerificationView(discord.ui.View):
             except discord.HTTPException:
                 pass
 
+        if config.WELCOME_CHANNEL_NAME:
+            welcome_channel = discord.utils.get(guild.text_channels, name=config.WELCOME_CHANNEL_NAME)
+            if welcome_channel is not None:
+                try:
+                    await welcome_channel.send(
+                        config.WELCOME_MESSAGE_TEMPLATE.format(member=member.mention, guild=guild.name)
+                    )
+                except discord.Forbidden:
+                    logger.error(f"ウェルカムチャンネルへの送信権限がありません ({guild.name})")
+            else:
+                logger.error(f"ウェルカムチャンネル「{config.WELCOME_CHANNEL_NAME}」が見つかりません ({guild.name})")
+
     async def reject(self, interaction: discord.Interaction):
         guild = interaction.guild
         assert guild is not None
