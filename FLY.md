@@ -12,6 +12,33 @@ Railway から Fly.io に移すための手順。設定は `fly.toml`、ビル�
 > 2 つの bot が同じイベントに反応して、二重に BAN・キック・メッセージ送信をしてしまう。
 > 切り替えの間はサーバーへの参加を止めておく。
 
+## スマホから移行する場合（flyctl を使わない）
+
+PC がないときは、GitHub Actions の「Fly.io 初回セットアップ」が 1〜3 の作業を代わりにやる。
+何度実行しても大丈夫（あるものは作り直さない）。
+
+1. **Fly.io**（ブラウザ）: ログインして、支払い方法が未登録なら登録する。
+   ダッシュボードのトークン設定で **Org トークン**を作ってコピーする
+   （アプリを作るので、アプリ用の deploy トークンでは足りない）。
+2. **GitHub**（ブラウザ）: このリポジトリの Settings → Secrets and variables → Actions →
+   New repository secret で登録する。
+   - `FLY_API_TOKEN`: 1. の Org トークン
+   - `DISCORD_TOKEN`: Bot のトークン（更新後の新しいもの）
+   - `BOT_ENV`（任意）: Railway の Variables に入れていた他の設定。1 行に 1 つ `名前=値` で書く
+     （`DISCORD_TOKEN` と `DB_PATH` は書かなくてよい。書いても無視される）
+3. **Railway**（ブラウザ）: このサービスを停止する。
+4. **GitHub**: Actions タブ → 「Fly.io 初回セットアップ」→ Run workflow。
+   「Railway のサービスを止めた」にチェックを入れて実行する。
+   - アプリ名が使われていて失敗したら、GitHub 上で `fly.toml` の `app` を別の名前に変えて、もう一度実行する
+5. Actions のログの最後に `fly status` が出て、Discord で Bot がオンラインになったら、サーバーへの参加を再開する。
+
+以後は main にマージするたびに、同じ `FLY_API_TOKEN` で自動デプロイされる（4. と同じ）。
+Org トークンは権限が広いので、落ち着いたら下の 4. の deploy トークンに差し替えるとよい。
+
+---
+
+以下は PC（flyctl）で作業する場合の手順。
+
 ## 1. 準備（初回だけ）
 
 ```bash

@@ -1,0 +1,101 @@
+# Fly.io の初回セットアップ（スマホからでも実行できる）。何度実行しても大丈夫。
+# アプリとボリュームがなければ作り、シークレットを登録して、デプロイする。
+# 事前に GitHub の Secrets に登録しておくもの（手順は FLY.md）:
+#   FLY_API_TOKEN  Fly.io の Org トークン（アプリを作るので deploy トークンでは足りない）
+#   DISCORD_TOKEN  Bot のトークン
+#   BOT_ENV        （任意）Railway で設定していた他の環境変数。1 行に 1 つ「名前=値」
+name: Fly.io 初回セットアップ
+
+on:
+  workflow_dispatch:
+    inputs:
+      railway_stopped:
+        description: Railway のサービスを止めた（同じトークンで二重に動かさないため）
+        type: boolean
+        required: true
+        default: false
+      org:
+        description: Fly.io の組織（普通は personal のまま）
+        type: string
+        default: personal
+
+concurrency: deploy-group
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - name: 実行前の確認
+        env:
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+        run: |
+          if [ "${{ inputs.railway_stopped }}" != "true" ]; then
+            echo "::error::先に Railway のサービスを止めて、「Railway のサービスを止めた」にチェックを入れて実行してください"
+            exit 1
+          fi
+          [ -n "$FLY_API_TOKEN" ] || { echo "::error::Secrets に FLY_API_TOKEN がありません"; exit 1; }
+          [ -n "$DISCORD_TOKEN" ] || { echo "::error::Secrets に DISCORD_TOKEN がありません"; exit 1; }
+
+      - uses: actions/checkout@v5
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: fly.toml からアプリ名とボリューム名を読む
+        id: cfg
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import tomllib
+          c = tomllib.load(open('fly.toml', 'rb'))
+          print(f"app={c['app']}")
+          print(f"volume={c['mounts'][0]['source']}")
+          print(f"region={c.get('primary_region', 'nrt')}")
+          PY
+          cat "$GITHUB_OUTPUT"
+
+      - name: アプリを作る（なければ）
+        env:
+          APP: ${{ steps.cfg.outputs.app }}
+          ORG: ${{ inputs.org }}
+        run: |
+          if flyctl apps list --json | jq -e --arg a "$APP" 'any(.[]; (.Name // .name) == $a)' > /dev/null; then
+            echo "アプリ $APP はすでにあります"
+          elif ! flyctl apps create "$APP" --org "$ORG"; then
+            echo "::error::アプリ $APP を作れませんでした。名前が使われている場合は fly.toml の app を別の名前に変えて、もう一度実行してください"
+            exit 1
+          fi
+
+      - name: ボリュームを作る（なければ）
+        env:
+          APP: ${{ steps.cfg.outputs.app }}
+          VOLUME: ${{ steps.cfg.outputs.volume }}
+          REGION: ${{ steps.cfg.outputs.region }}
+        run: |
+          if flyctl volumes list --app "$APP" --json | jq -e --arg v "$VOLUME" 'any(.[]; (.name // .Name) == $v)' > /dev/null; then
+            echo "ボリューム $VOLUME はすでにあります"
+          else
+            flyctl volumes create "$VOLUME" --app "$APP" --region "$REGION" --size 1 --yes
+          fi
+
+      - name: シークレットを登録する
+        env:
+          APP: ${{ steps.cfg.outputs.app }}
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          BOT_ENV: ${{ secrets.BOT_ENV }}
+        run: |
+          # 値がログやプロセス一覧に出ないよう、標準入力で渡す。DB_PATH は fly.toml で決めているので除く
+          {
+            printf 'DISCORD_TOKEN=%s\n' "$DISCORD_TOKEN"
+            printf '%s\n' "$BOT_ENV" | tr -d '\r' | grep -E '^[A-Za-z_][A-Za-z0-9_]*=' | grep -vE '^(DISCORD_TOKEN|DB_PATH)=' || true
+          } | flyctl secrets import --app "$APP" --stage
+          flyctl secrets list --app "$APP"
+
+      - name: デプロイする
+        env:
+          APP: ${{ steps.cfg.outputs.app }}
+        run: |
+          flyctl deploy --app "$APP" --remote-only
+          # Bot は 1 プロセスだけで動かす
+          flyctl scale count 1 --app "$APP" --yes
+          flyctl status --app "$APP"
