@@ -1,15 +1,20 @@
 import logging
+from datetime import datetime, timedelta
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 import config
 from utils import storage
 
 logger = logging.getLogger("SecurityBot.verification")
 
+HEARTBEAT_SECONDS = 60  # 稼働中であることを記録する間隔
+# 停止直前に参加した人を取りこぼさないよう、最後の記録より少し前から確認する
+CATCH_UP_MARGIN = timedelta(seconds=HEARTBEAT_SECONDS * 2)
 
-def build_request_embed(member: discord.Member) -> discord.Embed:
+
+def build_request_embed(member: discord.Member, missed: bool = False) -> discord.Embed:
     embed = discord.Embed(
         title="🔔 認証申請",
         description=f"{member.mention} さんがサーバーに参加しました。",
@@ -21,6 +26,12 @@ def build_request_embed(member: discord.Member) -> discord.Embed:
         value=discord.utils.format_dt(member.created_at, style="R"),
         inline=False,
     )
+    if missed:
+        embed.add_field(
+            name="⚠️ Bot停止中の参加",
+            value=f"{discord.utils.format_dt(member.joined_at, style='f')} に参加。Botの再起動後に申請を作成しました。",
+            inline=False,
+        )
     embed.set_thumbnail(url=member.display_avatar.url)
     embed.set_footer(text="管理者が下のボタンで承認・拒否できます。")
     return embed
@@ -200,6 +211,9 @@ class VerificationView(discord.ui.View):
 class Verification(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        # 前回の稼働終了時刻（起動時に読む）と、取りこぼし確認を済ませたか
+        self._previous_seen: datetime | None = None
+        self._caught_up = False
 
     async def cog_load(self):
         # 保留中の承認申請に対して永続Viewを再登録し、再起動後もボタンを有効にする
@@ -208,9 +222,60 @@ class Verification(commands.Cog):
             self.bot.add_view(VerificationView(entry["user_id"]), message_id=int(message_id))
         if pending:
             logger.info(f"保留中の認証申請 {len(pending)} 件のViewを再登録しました。")
+        self._previous_seen = await storage.get_last_seen()
+        self._heartbeat.start()
+
+    def cog_unload(self):
+        self._heartbeat.cancel()
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
+        await self._start_verification(member)
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        # Botが止まっていた間に参加した人の申請を作る（on_readyは再接続でも呼ばれるので初回のみ）
+        if self._caught_up:
+            return
+        self._caught_up = True
+        await self._catch_up_missed_joins()
+
+    async def _catch_up_missed_joins(self):
+        if self._previous_seen is None:
+            # 記録がない初回起動では、既存メンバーを巻き込まないよう何もしない
+            logger.info("稼働記録がないため、停止中の参加者の確認を省略しました。")
+            return
+
+        since = self._previous_seen - CATCH_UP_MARGIN
+        pending = {(e["guild_id"], e["user_id"]) for e in (await storage.load_pending()).values()}
+        for guild in self.bot.guilds:
+            member_role = discord.utils.get(guild.roles, name=config.MEMBER_ROLE_NAME)
+            missed = [
+                m for m in guild.members
+                if not m.bot
+                and m.joined_at is not None and m.joined_at >= since
+                and (guild.id, m.id) not in pending
+                and (member_role is None or member_role not in m.roles)
+            ]
+            for member in missed:
+                # 1人の失敗で残りが処理されなくならないようにする
+                try:
+                    await self._start_verification(member, missed=True)
+                except Exception as e:
+                    logger.error(f"停止中の参加者の申請作成に失敗: {member} {type(e).__name__}: {e}")
+            if missed:
+                logger.info(f"停止中に参加した {len(missed)} 人の認証申請を作成しました ({guild.name})")
+
+    @tasks.loop(seconds=HEARTBEAT_SECONDS)
+    async def _heartbeat(self):
+        """稼働中であることを記録する（次回起動時に、止まっていた間の参加者を探すため）"""
+        await storage.set_last_seen(discord.utils.utcnow())
+
+    @_heartbeat.before_loop
+    async def _before_heartbeat(self):
+        await self.bot.wait_until_ready()
+
+    async def _start_verification(self, member: discord.Member, missed: bool = False):
         guild = member.guild
         pending_role = discord.utils.get(guild.roles, name=config.PENDING_ROLE_NAME)
 
@@ -227,7 +292,7 @@ class Verification(commands.Cog):
             logger.error(f"承認申請チャンネル「{config.REQUEST_CHANNEL_NAME}」が見つかりません ({guild.name})")
             return
 
-        embed = build_request_embed(member)
+        embed = build_request_embed(member, missed=missed)
         view = VerificationView(member.id)
         try:
             msg = await channel.send(embed=embed, view=view)
