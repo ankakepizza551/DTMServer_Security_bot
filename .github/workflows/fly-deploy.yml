@@ -1,0 +1,61 @@
+# main へのマージ（push）で構文チェックを実行し、通ったら Fly.io にデプロイする。
+# GitHub の Secrets に FLY_API_TOKEN がない間はデプロイを飛ばす（移行手順は FLY.md）。
+name: Check & Fly Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m compileall -q .
+      - name: すべての cog が読み込めるか確認
+        env:
+          DB_PATH: ${{ runner.temp }}/check/pending.json
+        run: |
+          python - <<'PY'
+          import asyncio
+          import discord
+          from discord.ext import commands
+          import main
+
+          async def check():
+              bot = commands.Bot(command_prefix='!', intents=discord.Intents.default())
+              for cog in main.COGS:
+                  await bot.load_extension(cog)
+              await bot.close()
+              print('loaded:', ', '.join(main.COGS))
+
+          asyncio.run(check())
+          PY
+
+  deploy:
+    needs: check
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    concurrency: deploy-group # デプロイが同時に走らないようにする
+    steps:
+      - name: FLY_API_TOKEN が登録されているか確認
+        id: token
+        run: echo "present=${{ secrets.FLY_API_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+      - if: steps.token.outputs.present != 'true'
+        run: echo "::notice::FLY_API_TOKEN が未登録のためデプロイを飛ばしました（FLY.md を参照）"
+      - if: steps.token.outputs.present == 'true'
+        uses: actions/checkout@v5
+      - if: steps.token.outputs.present == 'true'
+        uses: superfly/flyctl-actions/setup-flyctl@master
+      - if: steps.token.outputs.present == 'true'
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
