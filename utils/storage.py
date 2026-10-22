@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+from datetime import datetime
 
 import config
 
@@ -49,3 +50,26 @@ async def find_pending_by_user(guild_id: int, user_id: int) -> int | None:
         if entry.get("guild_id") == guild_id and entry.get("user_id") == user_id:
             return int(message_id)
     return None
+
+
+def _state_path() -> str:
+    # 保留中申請ファイルと同じ場所（Fly.io ではボリューム）に置く
+    return os.path.join(os.path.dirname(config.DB_PATH) or ".", "state.json")
+
+
+async def get_last_seen() -> datetime | None:
+    """Botが最後に稼働していた時刻（UTC）。一度も記録がなければNone"""
+    async with _lock:
+        try:
+            with open(_state_path(), "r", encoding="utf-8") as f:
+                value = json.load(f).get("last_seen")
+        except FileNotFoundError:
+            return None
+    return datetime.fromisoformat(value) if value else None
+
+
+async def set_last_seen(at: datetime) -> None:
+    async with _lock:
+        _ensure_file()
+        with open(_state_path(), "w", encoding="utf-8") as f:
+            json.dump({"last_seen": at.isoformat()}, f)
