@@ -1,0 +1,11 @@
+.git
+.github
+.env
+data/
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+push.bat
+FLY.md

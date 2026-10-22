@@ -1,0 +1,24 @@
+# Fly.io の設定。移行手順は FLY.md を参照。
+# app 名は Fly.io 全体で一意なので、使われていたら変更すること。
+
+app = 'dtmserver-security-bot'
+primary_region = 'nrt'
+
+[build]
+
+[env]
+  # 状態ファイルはボリューム（/data）に置き、デプロイしても消えないようにする
+  DB_PATH = '/data/pending.json'
+
+[[mounts]]
+  source = 'dtm_security_data'
+  destination = '/data'
+
+# Web サービスを持たない常駐プロセス。[http_service] がないので自動停止もされない
+[[restart]]
+  policy = 'always'
+
+[[vm]]
+  memory = '256mb'
+  cpu_kind = 'shared'
+  cpus = 1
