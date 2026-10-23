@@ -27,7 +27,8 @@ intents = discord.Intents.default()
 intents.members = True
 intents.guilds = True
 
-bot = commands.Bot(command_prefix=config.PREFIX, intents=intents)
+# message_content インテントなしでは「!」コマンドの本文が読めないため、Botへのメンションでも受け付ける
+bot = commands.Bot(command_prefix=commands.when_mentioned_or(config.PREFIX), intents=intents)
 
 
 @bot.event
